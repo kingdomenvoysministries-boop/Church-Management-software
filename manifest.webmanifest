@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "Kingdom Envoys Ministries",
+  "short_name": "Kingdom Envoys Ministries",
+  "description": "Church Care member records and attendance for Kingdom Envoys International Ministries.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F2F5EF",
+  "theme_color": "#F2F5EF",
+  "icons": [
+    {
+      "src": "./church-care-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./church-care-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
