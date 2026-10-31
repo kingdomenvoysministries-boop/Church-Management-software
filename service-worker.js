@@ -1,5 +1,5 @@
 /* Church Care app-shell cache only. No runtime responses or personal data are stored. */
-const CACHE_NAME = 'church-care-shell-v2';
+const CACHE_NAME = 'church-care-shell-v4';
 const SCOPE_URL = new URL(self.registration.scope);
 const SHELL_URLS = [
   new URL('./', SCOPE_URL).href,
@@ -29,7 +29,13 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== SCOPE_URL.origin) return;
 
-  // The only cache-first resources are the fixed, public app-shell files.
+  // The app page itself is network-first so updates always arrive; the cached copy is only an offline fallback.
+  if (url.href === new URL('./', SCOPE_URL).href) {
+    event.respondWith(fetch(request).catch(() => caches.match(request)));
+    return;
+  }
+
+  // The only cache-first resources are the fixed, public icon and manifest files.
   if (SHELL_URLS.includes(url.href)) {
     event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
     return;
@@ -39,4 +45,19 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(() => caches.match(new URL('./', SCOPE_URL).href)));
   }
+});
+
+// Tapping a notification opens the app on the Follow-Up page.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const page = (event.notification.data && event.notification.data.page) || 'followups';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const client of list) {
+      if (client.url.startsWith(SCOPE_URL.origin)) {
+        client.postMessage({ type: 'open-page', page });
+        return client.focus();
+      }
+    }
+    return self.clients.openWindow(new URL('./?page=' + page, SCOPE_URL).href);
+  }));
 });
