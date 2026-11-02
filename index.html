@@ -1436,7 +1436,7 @@
         const openCases = db.followups.filter(f => f.status !== "resolved");
         const NAV_ORDER = ["overview","admin","reports","people","firstTimers","register","attendance","followups","souls","groups","events","projects","chat","messages","finance","staff","settings"];
         const NAV_GROUPS = { overview: "Home", people: "People & follow-up", events: "Church life", finance: "Administration" };
-        const nav = NAV_ORDER.filter(k => pages[k] && (k !== "admin" || isAdmin())).concat(Object.keys(pages).filter(k => !NAV_ORDER.includes(k) && k !== "plans")).map(key => {
+        const nav = NAV_ORDER.filter(k => pages[k] && (k !== "settings" || isAdmin())).concat(Object.keys(pages).filter(k => !NAV_ORDER.includes(k) && k !== "plans")).map(key => {
           const count = key === "firstTimers" && uncontactedNewPeople().length ? `<small class="nav-count">${uncontactedNewPeople().length}</small>` : key === "followups" && openCases.length ? `<small class="nav-count">${openCases.length}</small>${fuUnread() ? `<b class="bell-badge nav-new">${fuUnread()}</b>` : ""}` : key === "chat" && chatUnread() ? `<small class="nav-count">${chatUnread()}</small>` : "";
           const btn = `<button type="button" class="nav-item ${(currentPage === key || (key === "projects" && currentPage === "plans")) ? "active" : ""}" data-page="${key}" ${(currentPage === key || (key === "projects" && currentPage === "plans")) ? 'aria-current="page"' : ""}>${icon(key)}<span>${escapeHtml(pages[key][0])}</span>${count}</button>`;
           return (NAV_GROUPS[key] ? `<div class="nav-label nav-group-label">${NAV_GROUPS[key]}</div>` : "") + btn;
@@ -3672,6 +3672,9 @@
 
       /* ===== Supabase shared storage: staff login + record-level sync (every minute) ===== */
       const SUPA = { url: "https://pmpdvbedtiputoyblupx.supabase.co", key: "sb_publishable_UDjbtMExIUXMP9p_M6NxKw_NlXUQsGH" };
+      /* Separate administrator login: the admin account's email is fixed here; only its password (set in Supabase) is typed.
+         Must match the email created in Supabase -> Authentication -> Users (see supabase-admin-setup.sql). */
+      const ADMIN_LOGIN_EMAIL = "admin@churchfollowup.app";
       const SESSION_KEY = "church-care-supa-session", SYNC_KEY = "church-care-supa-sync";
       const SYNC_KEYS = [...Object.keys(TRACKED), "chat", "campaigns", "activity"];
       const supa = { session: null, syncing: false, again: false, timer: null, error: "", lastSync: null };
@@ -3685,7 +3688,7 @@
       const syncKeys = () => SYNC_KEYS.filter(k => k !== "transactions" || canFinance());
       const listOf = k => Array.isArray(db[k]) ? db[k] : (db[k] = []);
       const persistSession = () => { try { localStorage.setItem(SESSION_KEY, JSON.stringify(supa.session)); } catch {} };
-      const clearSession = () => { supa.session = null; try { localStorage.removeItem(SESSION_KEY); } catch {} };
+      const clearSession = () => { supa.session = null; try { localStorage.removeItem(SESSION_KEY); sessionStorage.removeItem("church-care-admin-unlocked"); sessionStorage.removeItem("church-care-staff-stash"); } catch {} };
 
       function supaFetch(path, opts = {}, auth = true) {
         const headers = { apikey: SUPA.key, "Content-Type": "application/json", ...(opts.headers || {}) };
@@ -3715,6 +3718,7 @@
         const rows = pr.ok ? await pr.json() : [];
         if (!rows.length) { clearSession(); throw new Error("This account has not been approved for Church Follow-Up yet. Ask the administrator to add it."); }
         setSession(j, rows[0].role);
+        try { sessionStorage.removeItem("church-care-admin-unlocked"); sessionStorage.removeItem("church-care-staff-stash"); } catch {}
       }
 
       function currentHashes() {
@@ -3752,13 +3756,16 @@
           const part = await r.json(); if (!Array.isArray(part) || !part.length) break;
           rows = rows.concat(part); offset += part.length;   // follow what the server really returned (it may cap pages below 1000)
         }
-        let changed = 0; const allowed = new Set(syncKeys());
+        let changed = 0; const allowed = new Set(syncKeys()), stats = supa.pullStats = { rows: rows.length, skipped: 0, fixed: 0, other: 0 };
         for (const row of rows) {
-          if (!allowed.has(row.collection)) continue;
+          if (!allowed.has(row.collection)) { stats.other++; continue; }
           const list = listOf(row.collection), h = syncState.hashes[row.collection] || (syncState.hashes[row.collection] = {});
           const idx = list.findIndex(x => x.id === row.id);
           if (row.deleted) { if (idx >= 0) { list.splice(idx, 1); changed++; } delete h[row.id]; continue; }
-          const data = row.data; if (!data || !data.id) continue;
+          let data = row.data;
+          if (typeof data === "string") { try { data = JSON.parse(data); } catch { data = null; } }   // data saved as text
+          if (!data || typeof data !== "object" || Array.isArray(data)) { stats.skipped++; continue; }
+          if (!data.id) { data = { ...data, id: row.id }; stats.fixed++; }                           // id only on the row, not inside data
           const dh = hashOf(data);
           if (idx >= 0) { if (hashOf(list[idx]) !== dh) { list[idx] = data; changed++; } } else { list.push(data); changed++; }
           h[row.id] = dh;
@@ -3819,7 +3826,7 @@
           const changed = await pullAndApply(true);
           await pushPending();
           supa.error = ""; supa.lastSync = new Date();
-          toast(changed ? `Sync complete: ${changed} record${changed === 1 ? "" : "s"} updated on this device.` : "Sync complete: already in step.");
+          { const ps = supa.pullStats || {}; toast((changed ? `Sync complete: ${changed} record${changed === 1 ? "" : "s"} updated on this device.` : "Sync complete: already in step.") + (ps.skipped ? ` ${ps.skipped} shared record${ps.skipped === 1 ? "" : "s"} could not be read.` : ""), !!ps.skipped); }
         } catch (err) { supa.error = String(err.message || err); toast("Sync problem: " + supa.error, true); }
         finally { supa.syncing = false; paintSync(); }
         await checkSharedCount();
@@ -4106,7 +4113,7 @@
           : !sc ? "Compare the people on this device with the shared database."
           : sc.busy ? "Checking…"
           : sc.error ? `Could not check: ${escapeHtml(sc.error)}`
-          : `This device: <i class="manage-num">${sc.local}</i> people · Shared database: <i class="manage-num">${sc.remote === null ? "unknown" : sc.remote}</i> people${sc.remote !== null && sc.remote !== sc.local ? " — they differ. Use “Sync everything now”." : sc.remote !== null ? " — in step." : ""}`;
+          : `This device: <i class="manage-num">${sc.local}</i> people · Shared database: <i class="manage-num">${sc.remote === null ? "unknown" : sc.remote}</i> people${sc.remote !== null && sc.remote !== sc.local ? " — they differ. Use “Sync everything now”." : sc.remote !== null ? " — in step." : ""}${supa.pullStats ? ` Last download: ${supa.pullStats.rows} rows, ${supa.pullStats.skipped} unreadable, ${supa.pullStats.fixed} repaired.` : ""}`;
         return `<section class="card manage-card">${cardHead("Manage", "Keep the directory complete, correct and in step", `<button class="text-button" type="button" data-x="people-manage">Close</button>`)}<div class="card-body manage-body">
           <div class="manage-counts"><div><b>${active.length}</b><span>people in directory</span></div><div><b>${archived}</b><span>archived</span></div><div><b>${active.filter(m => m.phone).length}</b><span>with a phone number</span></div><div><b>${active.filter(m => m.type === "visitor").length}</b><span>visitors</span></div></div>
           ${health}
@@ -4492,8 +4499,8 @@
         const v = String(r || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
         return /^(admin|administrator|superadmin|owner)$/.test(v) ? "admin" : v;
       }
-      function isAdmin() { try { return !!supa.session && normRole(supa.session.role) === "admin"; } catch { return false; } }
-      const roleLabel = r => ({ admin: "Admin", treasurer: "Treasurer", followup: "Follow-up staff" })[normRole(r)] || (normRole(r) ? normRole(r) : "No role");
+      function isAdmin() { try { return !!supa.session && normRole(supa.session.role) === "admin" && sessionStorage.getItem("church-care-admin-unlocked") === supa.session.user.id; } catch { return false; } }
+      const roleLabel = r => (normRole(r) === "admin" && !isAdmin()) ? "Admin (locked)" : ({ admin: "Admin", treasurer: "Treasurer", followup: "Follow-up staff" })[normRole(r)] || (normRole(r) ? normRole(r) : "No role");
       /* Re-read the role from the profiles table on load, on return to the app, and every 5 minutes,
          so changing someone to admin in Supabase works without signing out and in again. */
       async function refreshRole() {
@@ -4511,7 +4518,11 @@
       const ADMIN_ONLY = [
         '[data-action="add-member"]', '[data-action="quick-add"]', '[data-action="import-csv"]', '[data-action="import-backup"]', '[data-action="reset-demo"]',
         '[data-action="new-project"]', '[data-action="edit-project"]', '[data-action="new-project-task"]', '[data-action="edit-project-task"]', '[data-action="delete-project-task"]',
-        '[data-action="add-staff"]', '[data-action="edit-staff"]', '[data-act="delete-person"]', '[data-act="plan-new"]', '[data-act="plan-edit"]', '[data-act="plan-delete"]'
+        '[data-action="add-staff"]', '[data-action="edit-staff"]', '[data-act="delete-person"]', '[data-act="plan-new"]', '[data-act="plan-edit"]', '[data-act="plan-delete"]',
+        '[data-action="edit-member"]', '[data-action="new-event"]', '[data-action="new-event-for-date"]', '[data-action="edit-event"]', '[data-action="cancel-event"]',
+        '[data-action="add-group"]', '[data-action="edit-group"]', '[data-action="remove-group-member"]', '[data-action="add-volunteer"]', '[data-action="edit-volunteer"]',
+        '[data-action="assign-volunteer"]', '[data-action="remove-assignment"]', '[data-act="duty-delete"]', '[data-act="del-quote"]', '[data-act="del-photo"]',
+        '[data-x="people-manage"]', '[data-x="dupes"]', '[data-x="merge"]', '[data-x="not-dupe"]', '[data-x="consent-all"]', '[data-x="consent-save"]'
       ];
       { const st = document.createElement("style"); st.id = "admin-only-style"; st.textContent = `html[data-admin="0"] ${ADMIN_ONLY.join(',html[data-admin="0"] ')} { display: none !important; }
         .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 13px; margin-bottom: 15px; }
@@ -4525,13 +4536,47 @@
         if (e.target.closest && e.target.closest(ADMIN_ONLY.join(","))) { e.preventDefault(); e.stopImmediatePropagation(); adminDeny(); }
       }, true);
       { const guardNew = (name, fn, onlyNew) => fn && function () { if (!isAdmin() && (!onlyNew || !arguments[0])) { adminDeny(); return; } return fn.apply(this, arguments); };
-        memberForm = guardNew("memberForm", memberForm, true); projectForm = guardNew("projectForm", projectForm, false);
+        memberForm = guardNew("memberForm", memberForm, false); projectForm = guardNew("projectForm", projectForm, false);
         projectTaskForm = guardNew("projectTaskForm", projectTaskForm, false); staffForm = guardNew("staffForm", staffForm, false);
-        if (typeof planForm === "function") planForm = guardNew("planForm", planForm, false); }
-      { const _r2 = render; render = function () { document.documentElement.dataset.admin = isAdmin() ? "1" : "0"; return _r2.apply(this, arguments); }; }
+        if (typeof planForm === "function") planForm = guardNew("planForm", planForm, false);
+        eventForm = guardNew("eventForm", eventForm, false); volunteerForm = guardNew("volunteerForm", volunteerForm, false);
+        assignmentForm = guardNew("assignmentForm", assignmentForm, false); groupForm = guardNew("groupForm", groupForm, false); }
+      { const _r2 = render; render = function () { document.documentElement.dataset.admin = isAdmin() ? "1" : "0"; if (currentPage === "settings" && !isAdmin()) currentPage = "overview"; return _r2.apply(this, arguments); }; }
+
+      /* ---- Administrator login (second login, on top of the normal site sign-in) ---- */
+      const adminForm = () => `<form id="admin-unlock-form" autocomplete="off" style="display:grid;gap:10px;max-width:340px"><label class="field"><span>Administrator password</span><input class="input" type="password" name="pw" required autocomplete="current-password" placeholder="Administrator password"></label><p id="admin-unlock-error" role="alert" style="color:#a04a4a;min-height:18px;margin:0"></p><button class="button" type="submit">Unlock admin</button></form>`;
+      function openAdminLogin() { openModal("Administrator login", "Enter the administrator password to unlock editing.", adminForm()); }
+      async function adminUnlock(pw) {
+        const r = await supaFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email: ADMIN_LOGIN_EMAIL, password: pw }) }, false);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error("Wrong administrator password.");
+        const pr = await fetch(SUPA.url + `/rest/v1/profiles?select=role&user_id=eq.${encodeURIComponent(j.user.id)}`, { headers: { apikey: SUPA.key, Authorization: `Bearer ${j.access_token}` } });
+        const rows = pr.ok ? await pr.json() : [];
+        if (!rows.length || normRole(rows[0].role) !== "admin") throw new Error("This account is not set up as administrator in Supabase.");
+        try { if (supa.session && supa.session.user.id !== j.user.id) sessionStorage.setItem("church-care-staff-stash", JSON.stringify(supa.session)); } catch {}
+        setSession(j, rows[0].role);
+        try { sessionStorage.setItem("church-care-admin-unlocked", j.user.id); } catch {}
+      }
+      document.addEventListener("submit", async e => {
+        if (e.target.id !== "admin-unlock-form") return;
+        e.preventDefault(); e.stopImmediatePropagation();
+        const f = e.target, btn = f.querySelector("button[type=submit]"), err = f.querySelector("#admin-unlock-error");
+        btn.disabled = true; btn.textContent = "Checking…";
+        try { await adminUnlock(String(new FormData(f).get("pw"))); closeModal(); render(); syncOnce(); toast("Administrator unlocked."); }
+        catch (ex) { err.textContent = ex.message === "Failed to fetch" ? "Cannot reach the server. Check the internet connection." : ex.message; btn.disabled = false; btn.textContent = "Unlock admin"; }
+      }, true);
+      document.addEventListener("click", e => {
+        if (!e.target.closest || !e.target.closest('[data-act="admin-toggle"]')) return;
+        if (!isAdmin()) { openAdminLogin(); return; }
+        try { sessionStorage.removeItem("church-care-admin-unlocked"); const st = sessionStorage.getItem("church-care-staff-stash"); if (st) { supa.session = JSON.parse(st); persistSession(); sessionStorage.removeItem("church-care-staff-stash"); } } catch {}
+        if (currentPage === "admin") currentPage = "overview";
+        render(); syncOnce(); toast("Admin locked. Editing is turned off.");
+      });
+      { const _r3 = render; render = function () { const out = _r3.apply(this, arguments); const a = document.querySelector(".top-actions"); if (a && supa.session) { let b = document.getElementById("admin-toggle"); if (!b) { a.insertAdjacentHTML("afterbegin", `<button class="button secondary small" type="button" id="admin-toggle" data-act="admin-toggle"></button>`); b = document.getElementById("admin-toggle"); } b.textContent = isAdmin() ? "Lock admin" : "Admin login"; }
+        return out; }; }
 
       function renderAdmin() {
-        if (!isAdmin()) return `${pageHeading("Restricted", "Admin dashboard", "Only administrators can open this page.")}<div class="card empty"><b>Administrators only</b>Your account (${escapeHtml(supa.session ? supa.session.user.email : "not signed in")}) has the role “${escapeHtml(roleLabel(supa.session && supa.session.role))}”. To get the dashboard, set this account's role to admin in the Supabase profiles table, then reopen the app.</div>`;
+        if (!isAdmin()) return `${pageHeading("Administrator", "Admin login", "Editing is locked. Enter the administrator password to add or remove people and change records.")}<section class="card"><div class="card-body">${adminForm()}</div></section>`;
         const people = activeMembers(), tasks = db.projectTasks || [], openTasks = tasks.filter(t => t.status !== "completed"), q = (ui.adminSearch || "").trim().toLowerCase();
         const added = m => String(m.createdAt || m.joinedAt || "");
         const list = (q ? people.filter(m => `${fullName(m)} ${m.phone || ""} ${m.area || ""}`.toLowerCase().includes(q)) : [...people].sort((a, b) => added(b).localeCompare(added(a)))).slice(0, q ? 30 : 10);
@@ -4617,6 +4662,65 @@
       try { const q = new URLSearchParams(location.search).get("page"); if (q === "followups") currentPage = "followups"; } catch {}
 
       render();
+    })();
+  </script>
+  <script>
+    /* ===== "Download app" button: floats and blinks on every browser/device until the app is installed there ===== */
+    (() => {
+      const KEY = "church-care-app-installed";
+      const flagged = () => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
+      const setFlag = () => { try { localStorage.setItem(KEY, "1"); } catch {} };
+      const standalone = () => { try { return ["standalone", "minimal-ui", "window-controls-overlay", "fullscreen"].some(m => matchMedia(`(display-mode: ${m})`).matches) || navigator.standalone === true; } catch { return false; } };
+      if (standalone()) setFlag();
+      let deferred = null, btn = null;
+      const ua = navigator.userAgent || "";
+      const ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      const android = /android/i.test(ua), firefox = /firefox|fxios/i.test(ua);
+
+      const css = document.createElement("style");
+      css.textContent = `#dl-app{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));z-index:2147483000;display:flex;align-items:center;gap:8px;padding:13px 20px;border:0;border-radius:999px;background:var(--green,#5f1e29);color:#fff;font:700 15px/1.1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;cursor:pointer;box-shadow:0 8px 26px rgba(0,0,0,.35);animation:dl-blink 1.1s ease-in-out infinite}
+        #dl-app:hover{animation-play-state:paused}
+        @keyframes dl-blink{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(193,139,69,.85),0 8px 26px rgba(0,0,0,.35)}50%{opacity:.55;transform:scale(1.07);box-shadow:0 0 0 14px rgba(193,139,69,0),0 8px 26px rgba(0,0,0,.35)}}
+        #dl-help{position:fixed;inset:0;z-index:2147483001;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.55)}
+        #dl-help .box{max-width:400px;width:100%;background:var(--surface,#fff);color:var(--ink,#222);border-radius:16px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.4);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+        #dl-help h3{margin:0 0 10px;font-size:18px} #dl-help ol{margin:0 0 16px;padding-left:20px} #dl-help li{margin:6px 0}
+        #dl-help .row{display:flex;gap:8px;flex-wrap:wrap} #dl-help button{flex:1;padding:11px 14px;border-radius:10px;border:1px solid var(--line,#ccc);background:var(--surface,#fff);color:inherit;font:600 14px system-ui;cursor:pointer}
+        #dl-help button.main{background:var(--green,#5f1e29);color:#fff;border-color:transparent}`;
+      document.head.appendChild(css);
+
+      function hide() { if (btn) { btn.remove(); btn = null; } const h = document.getElementById("dl-help"); if (h) h.remove(); }
+      function show() {
+        if (btn || flagged() || standalone()) return;
+        btn = document.createElement("button"); btn.id = "dl-app"; btn.type = "button";
+        btn.setAttribute("aria-label", "Download the Kingdom Envoys app");
+        btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>Download app`;
+        btn.addEventListener("click", onClick);
+        document.body.appendChild(btn);
+      }
+      async function onClick() {
+        if (deferred) {
+          const ev = deferred; deferred = null;
+          try { ev.prompt(); const r = await ev.userChoice; if (r && r.outcome === "accepted") { setFlag(); hide(); } } catch {}
+          return;
+        }
+        help();
+      }
+      function help() {
+        if (document.getElementById("dl-help")) return;
+        const steps = ios ? ["Open this page in <b>Safari</b>.", "Tap the <b>Share</b> button (square with an arrow).", "Choose <b>Add to Home Screen</b>, then tap <b>Add</b>."]
+          : firefox && !android ? ["Firefox on a computer cannot install apps.", "Open this page in <b>Chrome</b> or <b>Edge</b>, then use the install icon in the address bar."]
+          : android ? ["Tap the browser menu <b>⋮</b> (top right).", "Choose <b>Install app</b> or <b>Add to Home screen</b>.", "Tap <b>Install</b>."]
+          : ["Click the <b>install icon</b> at the right end of the address bar, or open the browser menu <b>⋮</b>.", "Choose <b>Install Kingdom Envoys…</b> (or <b>Cast, save and share → Install page as app</b>).", "Click <b>Install</b>."];
+        const d = document.createElement("div"); d.id = "dl-help"; d.setAttribute("role", "dialog"); d.setAttribute("aria-modal", "true");
+        d.innerHTML = `<div class="box"><h3>Download the app</h3><ol>${steps.map(x => `<li>${x}</li>`).join("")}</ol><div class="row"><button type="button" data-dl="close">Close</button><button type="button" class="main" data-dl="done">I have installed it</button></div></div>`;
+        d.addEventListener("click", e => { const a = e.target.closest("[data-dl]"); if (e.target === d || (a && a.dataset.dl === "close")) d.remove(); else if (a && a.dataset.dl === "done") { setFlag(); hide(); } });
+        document.body.appendChild(d);
+      }
+      window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferred = e; show(); });
+      window.addEventListener("appinstalled", () => { setFlag(); deferred = null; hide(); });
+      try { matchMedia("(display-mode: standalone)").addEventListener("change", e => { if (e.matches) { setFlag(); hide(); } }); } catch {}
+      const start = () => show();
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start); else start();
     })();
   </script>
 </body>
