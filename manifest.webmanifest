@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#F2F5EF",
-  "theme_color": "#F2F5EF",
+  "background_color": "#F3F4F6",
+  "theme_color": "#F3F4F6",
   "icons": [
     {
       "src": "./church-care-icon-192.png",

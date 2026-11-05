@@ -20,6 +20,12 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 grant execute on function public.is_admin() to authenticated;
 
+-- 1b. Set (or reset) the admin account's password to admin@123
+update auth.users
+   set encrypted_password = crypt('admin@123', gen_salt('bf')),
+       updated_at = now()
+ where lower(email) = lower('admin@churchfollowup.app');
+
 -- 2. Give the admin email the 'admin' role
 update public.profiles set role = 'admin'
  where user_id = (select id from auth.users where lower(email) = lower('admin@churchfollowup.app'));
