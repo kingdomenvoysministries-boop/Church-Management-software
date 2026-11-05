@@ -1,5 +1,5 @@
 /* Church Care app-shell cache only. No runtime responses or personal data are stored. */
-const CACHE_NAME = 'church-care-shell-v4';
+const CACHE_NAME = 'church-care-shell-v5';
 const SCOPE_URL = new URL(self.registration.scope);
 const SHELL_URLS = [
   new URL('./', SCOPE_URL).href,

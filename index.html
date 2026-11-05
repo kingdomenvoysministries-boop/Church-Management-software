@@ -1164,14 +1164,9 @@
         firstTimers: ["New Converts / Guests", "Active tracking list: Follow-Up, attendance health and graduation."],
         register: ["Church People Register", "The official register of established members and graduated converts."],
         attendance: ["Attendance", "Record a service, see who was there, and review recent gatherings."],
-        events: ["Events & Calendar", "Coordinate ministry activities and reserve rooms without double-booking."],
-        projects: ["Projects & Tasks", "Track church projects, owners, deadlines, and what is pending or ongoing."],
         groups: ["Discipleship & Groups", "Manage small-group rosters and review each person’s pathway and engagement."],
         followups: ["Follow-Up", "Notice a change, make a thoughtful connection, and keep the next step clear."],
         souls: ["Souls Won", "Record new believers and connect each one to a follow-up."],
-        finance: ["Financial Vault", "A simple local ledger for offerings, expenses, and audit notes."],
-        chat: ["Team Chat", "Share notes, tag teammates, and reply in one place."],
-        messages: ["Messages", "Prepare personal messages for members who have opted in to SMS."],
         staff: ["Staff", "Keep the follow-up team and their responsibilities in one place."],
         settings: ["Settings & backup", "Set up church details and protect records with regular backups."]
       };
@@ -1434,9 +1429,9 @@
         const [pageTitle, pageDescription] = pages[currentPage] || pages.overview;
         document.title = `${pageTitle} · ${db.settings.churchName || "Church Follow-Up"}`;
         const openCases = db.followups.filter(f => f.status !== "resolved");
-        const NAV_ORDER = ["overview","admin","reports","people","firstTimers","register","attendance","followups","souls","groups","events","projects","chat","messages","finance","staff","settings"];
-        const NAV_GROUPS = { overview: "Home", people: "People & follow-up", events: "Church life", finance: "Administration" };
-        const nav = NAV_ORDER.filter(k => pages[k] && (k !== "settings" || isAdmin())).concat(Object.keys(pages).filter(k => !NAV_ORDER.includes(k) && k !== "plans")).map(key => {
+        const NAV_ORDER = ["overview","admin","reports","people","firstTimers","attendance","followups","souls","plans","settings"];
+        const NAV_GROUPS = { overview: "Home", people: "People & follow-up", staff: "Administration" };
+        const nav = NAV_ORDER.filter(k => pages[k] && (k !== "settings" || isAdmin())).concat(Object.keys(pages).filter(k => !NAV_ORDER.includes(k) && false)).map(key => {
           const count = key === "firstTimers" && uncontactedNewPeople().length ? `<small class="nav-count">${uncontactedNewPeople().length}</small>` : key === "followups" && openCases.length ? `<small class="nav-count">${openCases.length}</small>${fuUnread() ? `<b class="bell-badge nav-new">${fuUnread()}</b>` : ""}` : key === "chat" && chatUnread() ? `<small class="nav-count">${chatUnread()}</small>` : "";
           const btn = `<button type="button" class="nav-item ${(currentPage === key || (key === "projects" && currentPage === "plans")) ? "active" : ""}" data-page="${key}" ${(currentPage === key || (key === "projects" && currentPage === "plans")) ? 'aria-current="page"' : ""}>${icon(key)}<span>${escapeHtml(pages[key][0])}</span>${count}</button>`;
           return (NAV_GROUPS[key] ? `<div class="nav-label nav-group-label">${NAV_GROUPS[key]}</div>` : "") + btn;
@@ -1463,7 +1458,6 @@
                   <span class="save-state"><i class="save-dot"></i><span id="save-label">${storageAvailable ? "Saved on this device" : "Storage unavailable"}</span></span>
                   ${alertsSupported() && Notification.permission === "default" ? `<button class="button secondary small" type="button" data-enable-alerts="1">Turn on alerts</button>` : ""}
                   <button class="icon-button bell" type="button" data-page="followups" aria-label="Follow-Up, ${fuUnread()} new">${icon("followups")}${fuUnread() ? `<b class="bell-badge">${fuUnread()}</b>` : ""}</button>
-                  <button class="icon-button bell" type="button" data-page="chat" aria-label="Team chat, ${chatUnread()} unread">${icon("bell")}${chatUnread() ? `<b class="bell-badge">${chatUnread()}</b>` : ""}</button>
                   <button class="icon-button" type="button" data-action="theme" aria-label="Toggle dark mode">${icon(db.settings.theme === "dark" ? "sun" : "moon")}</button>
                   ${currentPage === "overview" ? "" : `<button class="icon-button" type="button" data-action="quick-add" aria-label="Add a person">${icon("plus")}</button>`}
                 </div>
@@ -1483,6 +1477,7 @@
         return `<div class="card-head"><div><h3>${escapeHtml(title)}</h3>${subtitle && /\d/.test(subtitle) ? `<p>${escapeHtml(subtitle)}</p>` : ""}</div>${action}</div>`;
       }
       function renderPage() {
+        if (["events","projects","chat","finance","messages","volunteers","register","groups","staff"].includes(currentPage)) currentPage = "overview";
         switch (currentPage) {
           case "admin": return renderAdmin();
           case "reports": return renderReports();
@@ -1626,8 +1621,8 @@
           </div>`;
       }
 
-      let peopleLimit = 100, peopleSig = "";
-      function peopleVisible(list) { const sig = `${ui.search}|${ui.memberType}|${ui.memberArea}|${ui.memberCheck}`; if (sig !== peopleSig) { peopleSig = sig; peopleLimit = 100; } return list.slice(0, peopleLimit); }
+      let peopleLimit = 5000, peopleSig = "";
+      function peopleVisible(list) { const sig = `${ui.search}|${ui.memberType}|${ui.memberArea}|${ui.memberCheck}`; if (sig !== peopleSig) { peopleSig = sig; peopleLimit = 5000; } return list.slice(0, peopleLimit); }
       function peopleMoreRow(total) { return total > peopleLimit ? `<tr><td colspan="6" style="text-align:center;padding:14px"><button class="button secondary small" type="button" data-act="people-more">Show 100 more · ${total - peopleLimit} remaining</button></td></tr>` : ""; }
       document.addEventListener("click", e => { if (e.target.closest('[data-act="people-more"]')) { peopleLimit += 100; renderPeopleRowsOnly(); } });
       function renderPeople() {
@@ -2564,9 +2559,7 @@
         if (db.settings.churchName === "New Day Community Church") db.settings.churchName = "Kingdom Envoys International Ministries";
         if (currentPage !== "chat") ui.chatFresh = null; else markChatRead();
         _render();
-        if (currentPage === "chat") { const l = document.getElementById("chat-log"); if (l) l.scrollTop = l.scrollHeight; }
-        if (!chatAnnounced) { chatAnnounced = true; const n = chatUnread(); if (n && currentPage !== "chat") setTimeout(() => toast(`You have ${n} unread team chat message${n > 1 ? "s" : ""}. Open Team Chat to read and reply.`), 600); }
-      };
+        if (currentPage === "chat") { const l = document.getElementById("chat-log"); if (l) l.scrollTop = l.scrollHeight; }      };
       window.addEventListener("storage", e => {
         if (e.key !== STORAGE_KEY) return;
         const ae = document.activeElement;
@@ -3291,12 +3284,6 @@
         let aDet = GATHERING_TYPES.map(g => { const rec = sessionsAsc(g.value).filter(s => inPeriod(s.date)), l = rec[rec.length - 1], t = l ? trendFor(l) : null; return rpLine(escapeHtml(g.label), l ? `${l.memberIds.length} on ${shortDate(l.date)}${t && t.diff ? ` (${t.diff > 0 ? "+" : ""}${t.diff})` : ""}` : "none recorded"); }).join("");
         if (last) { const streak = activeMembers().filter(m => isExpected(m, last.date, "Sunday Service") && !last.memberIds.includes(m.id) && missedStreak(m.id, last.date, "Sunday Service") >= 2).map(fullName); if (streak.length) aDet += `<p class="rp-note"><b>Missed 2+ Sundays in a row:</b> ${streak.slice(0, 10).map(escapeHtml).join(", ")}${streak.length > 10 ? ` and ${streak.length - 10} more` : ""}</p>`; }
         items.push(rpItem("attendance", "gold", "Attendance", aSent, aDet + rpLink("attendance", "Open attendance")));
-        // Projects
-        const projects = db.projects || [], tasks = db.projectTasks || [], done = tasks.filter(t => t.status === "completed"), openT = tasks.filter(t => t.status !== "completed");
-        const late = projects.filter(p => p.status !== "completed" && p.dueDate && p.dueDate < today), ld = done[done.length - 1], lp = ld && projects.find(p => p.id === ld.projectId);
-        const pSent = `${ld ? `${escapeHtml(String(ld.assignee || "Someone").split(" ")[0])} completed “${escapeHtml(ld.title)}”${lp ? ` (${escapeHtml(lp.name)})` : ""}. ` : "No tasks completed yet. "}${rpPl(openT.length, "task", "tasks")} still open${late.length ? `, ${rpPl(late.length, "project", "projects")} past due` : ""}.`;
-        const pDet = projects.filter(p => p.status !== "completed").map(p => { const ts = tasks.filter(t => t.projectId === p.id); return rpLine(`${escapeHtml(p.name)}<small>${escapeHtml(p.owner || "No owner")} · due ${shortDate(p.dueDate)}</small>`, `${ts.filter(t => t.status === "completed").length}/${ts.length} tasks`); }).join("") + (done.length ? `<p class="rp-note"><b>Completed:</b> ${done.slice(-6).map(t => `${escapeHtml(String(t.assignee || "Someone").split(" ")[0])}: ${escapeHtml(t.title)}`).join(" · ")}</p>` : "");
-        items.push(rpItem("projects", "", "Projects & tasks", pSent, (pDet || `<p class="rp-note">No projects yet.</p>`) + rpLink("projects", "Open project board")));
         // First timers & new converts
         const inR = m => all || inPeriod(m.recordedMonth || m.joinedAt || m.createdAt), ft = activeMembers().filter(m => isFirstTimer(m) && inR(m)), nc = activeMembers().filter(m => isNewConvert(m) && inR(m)), unc = uncontactedNewPeople().filter(inR);
         const fSent = `${rpPl(ft.length, "first timer", "first timers")} and ${rpPl(nc.length, "new convert", "new converts")} ${inP}${unc.length ? `; ${unc.length} not contacted yet` : "; all contacted"}.`;
@@ -3313,12 +3300,6 @@
         // Growth goals
         const plans = db.plans || [];
         if (plans.length) { const st = plans.map(planStats), n = k => st.filter(x => x.status === k).length; items.push(rpItem("plans", "gold", "Member growth goals", `${rpPl(plans.length, "goal", "goals")}: ${n("Achieved")} achieved, ${n("On track")} on track, ${n("Behind") + n("Deadline passed")} behind.`, plans.map((pl, i) => rpLine(escapeHtml(pl.title), `${st[i].current}/${st[i].target} · ${st[i].status}`)).join("") + rpLink("plans", "Open growth goals"))); }
-        // Giving
-        const tx = activeTransactions().filter(t => inPeriod(t.date)), inc = sumKind("income", tx), exp = sumKind("expense", tx);
-        items.push(rpItem("finance", "blue", "Giving & expenses", financeUnlocked ? `${cash(inc)} came in and ${cash(exp)} went out ${inP}.` : "Locked. Open the Financial Vault to include giving.", financeUnlocked ? rpLine("Income", cash(inc)) + rpLine("Expenses", cash(exp)) + rpLine("Net", cash(inc - exp)) + rpLine("Ledger entries", String(tx.length)) + rpLink("finance", "Open vault") : rpLink("finance", "Open Financial Vault")));
-        // Coming up
-        const ev = (db.events || []).filter(e => e.status !== "cancelled" && e.date >= today).sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || "").localeCompare(b.startTime || ""));
-        items.push(rpItem("events", "", "Coming up", ev.length ? `Next: ${escapeHtml(ev[0].title)} on ${shortDate(ev[0].date)}${ev.length > 1 ? ` (+${ev.length - 1} more)` : ""}.` : "Nothing scheduled.", ev.slice(0, 8).map(e => rpLine(escapeHtml(e.title), `${shortDate(e.date)} ${escapeHtml(e.startTime || "")}`)).join("") + rpLink("events", "Open calendar")));
         // Recent changes
         const act = db.activity || [];
         items.push(rpItem("clock", "gold", "Recent changes", act.length ? `${rpPl(act.length, "change", "changes")} logged. Latest: ${escapeHtml(act[0].label)}.` : "No changes logged yet.", act.slice(0, 8).map(a => rpLine(`${escapeHtml(a.label)}${a.count > 1 ? ` (×${a.count})` : ""}<small>${escapeHtml(a.area)}${a.by ? " · " + escapeHtml(a.by) : ""}</small>`, whenLabel(a.at))).join("")));
@@ -3536,7 +3517,7 @@
             <article class="card finance-stat"><span>Deadline passed</span><b>${stats.filter(x => x.status === "Deadline passed").length}</b></article>
           </div>
           <section class="card" style="margin-bottom:15px">${cardHead("Member growth goals", `${plans.length} ${plans.length === 1 ? "project" : "projects"}`)}<div class="card-body"><div class="project-grid">${plans.map(planCard).join("") || `<div class="empty"><b>No member growth projects yet</b>Add a goal such as “Retain 50 new members” with a target number and a deadline.</div>`}</div></div></section>
-          <section class="card">${cardHead("Church projects", `${projects.length} not yet complete`, `<button class="button secondary small" data-action="new-project">${icon("plus", 14)} Add project</button>`)}<div class="card-body"><div class="history-list">${projectRows || `<div class="empty"><b>No open projects</b>Repairs, furniture, and other church works appear here with their deadlines.</div>`}</div><button class="text-button" data-page="projects">Open Projects &amp; Tasks</button></div></section>`;
+          `;
       }
       function plansReportCard() {
         const plans = (db.plans || []).slice().sort((a, b) => (a.deadline || "").localeCompare(b.deadline || ""));
@@ -4192,7 +4173,7 @@
       }, { passive: true });
 
       /* ---- Member Growth Projects live under Projects & Tasks as a second tab ---- */
-      const growthTabs = () => `<div class="tabs" role="tablist" aria-label="Projects sections"><button type="button" class="tab-btn ${currentPage === "projects" ? "on" : ""}" role="tab" aria-selected="${currentPage === "projects"}" data-page="projects">Church projects &amp; tasks</button><button type="button" class="tab-btn ${currentPage === "plans" ? "on" : ""}" role="tab" aria-selected="${currentPage === "plans"}" data-page="plans">Member growth projects <span class="tab-count">${(db.plans || []).length}</span></button></div>`;
+      const growthTabs = () => `<div class="tabs" role="tablist" aria-label="Member growth sections"><button type="button" class="tab-btn ${currentPage === "plans" ? "on" : ""}" role="tab" aria-selected="${currentPage === "plans"}" data-page="plans">Member growth projects <span class="tab-count">${(db.plans || []).length}</span></button></div>`;
       const _renderProjectsV4 = renderProjects;
       renderProjects = function () { return _renderProjectsV4().replace('<div class="grid project-stats">', growthTabs() + '<div class="grid project-stats">'); };
       const _renderPlansV4 = renderPlans;
@@ -4585,17 +4566,14 @@
         const roleName = { admin: "Administrator", treasurer: "Treasurer", followup: "Follow-up staff" };
         const staffRows = (db.staff || []).map((st, i) => `<div class="admin-row">${badgeAvatar(st.fullName, i)}<div class="who"><b>${escapeHtml(st.fullName)}</b><span>${escapeHtml(st.email || "No email")}</span></div><span class="pill ${st.role === "admin" ? "" : "blue"}">${escapeHtml(roleName[st.role] || st.role)}</span><div class="btns"><button class="button secondary small" data-action="edit-staff" data-id="${escapeHtml(st.id)}">Edit</button></div></div>`).join("");
         const acts = (db.activity || []).slice(0, 8).map(a => `<div class="admin-row"><div class="who"><b>${escapeHtml(a.area || "")} · ${escapeHtml(a.action || "")}</b><span>${escapeHtml(a.label || "")}${a.by ? " · " + escapeHtml(a.by) : ""} · ${niceTime(a.at)}</span></div></div>`).join("");
-        const actions = `<button class="button" data-action="add-member">${icon("plus", 15)} Add person</button><button class="button secondary" data-action="new-project-task">${icon("plus", 15)} Add task</button>`;
+        const actions = `<button class="button" data-action="add-member">${icon("plus", 15)} Add person</button>`;
         return `${pageHeading("Administrator", "Admin dashboard", `Signed in as ${supa.session.user.email}. Only administrators can see and use these controls.`, actions)}
           <div class="admin-grid">
             ${statCard("People", people.length, `${people.filter(isNewConvert).length + people.filter(isFirstTimer).length} new converts / guests`, "people", "")}
-            ${statCard("Open tasks", openTasks.length, `${tasks.length} in total`, "projects", "gold")}
             ${statCard("Open follow-ups", db.followups.filter(f => f.status !== "resolved").length, `${(db.souls || []).length} souls recorded`, "followups", "rose")}
-            ${statCard("Staff accounts", (db.staff || []).length, `${(db.staff || []).filter(x => x.role === "admin").length} administrator${(db.staff || []).filter(x => x.role === "admin").length === 1 ? "" : "s"}`, "staff", "")}
-          </div>
+                      </div>
           <div class="admin-cols">
             <section class="card">${cardHead("People", q ? `${list.length} match${list.length === 1 ? "" : "es"}` : "Most recently added", `<button class="text-button" data-page="people">Open full list</button>`)}<div class="card-body"><input class="input" id="admin-search" type="search" placeholder="Search to find someone to remove…" value="${escapeHtml(ui.adminSearch || "")}" style="width:100%;margin-bottom:8px">${peopleRows || `<div class="empty"><b>No one found</b>Try another name.</div>`}</div></section>
-            <section class="card">${cardHead("Tasks", `${openTasks.length} open`, `<button class="text-button" data-action="new-project-task">Add task</button>`)}<div class="card-body">${taskRows || `<div class="empty"><b>No tasks yet</b>Add the first task.</div>`}</div></section>
             <section class="card">${cardHead("Staff & roles", `${(db.staff || []).length} on the team`, `<button class="text-button" data-action="add-staff">Add staff</button>`)}<div class="card-body">${staffRows || `<div class="empty"><b>No staff yet</b></div>`}</div></section>
             <section class="card">${cardHead("Recent activity", "Latest changes by the team")}<div class="card-body">${acts || `<div class="empty"><b>No activity yet</b></div>`}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="button secondary small" data-action="export-members">${icon("download", 13)} Export people</button><button class="button secondary small" data-action="download-backup">${icon("download", 13)} Download backup</button></div></div></section>
           </div>`;
